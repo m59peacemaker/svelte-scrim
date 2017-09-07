@@ -1,6 +1,6 @@
 {
   "name": "svelte-scrim",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "A vanilla JS scrim (backdrop) component made with Svelte.",
   "main": "build/Scrim.cjs.js",
   "module": "build/Scrim.js",
