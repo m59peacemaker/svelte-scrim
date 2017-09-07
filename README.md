@@ -45,5 +45,5 @@ import 'svelte-scrim/element'
 ```
 
 ```html
-<svelte-scrim />
+<svelte-scrim/>
 ```
