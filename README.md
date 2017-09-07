@@ -19,7 +19,7 @@ const scrim = new Scrim({
   target: document.body,
   data: { // Scrim.DEFAULTS
     opacity: 0.3,
-    background: '#000'
+    background: '#000000'
   }
 })
 ```
