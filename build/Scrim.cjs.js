@@ -2,24 +2,16 @@
 
 function noop() {}
 
-function assign(target) {
-	var k,
-		source,
-		i = 1,
-		len = arguments.length;
-	for (; i < len; i++) {
-		source = arguments[i];
-		for (k in source) target[k] = source[k];
-	}
-
-	return target;
+function assign(tar, src) {
+	for (var k in src) tar[k] = src[k];
+	return tar;
 }
 
-function appendNode(node, target) {
+function append(target, node) {
 	target.appendChild(node);
 }
 
-function insertNode(node, target, anchor) {
+function insert(target, node, anchor) {
 	target.insertBefore(node, anchor);
 }
 
@@ -31,51 +23,26 @@ function createElement(name) {
 	return document.createElement(name);
 }
 
-function setAttribute(node, attribute, value) {
-	node.setAttribute(attribute, value);
-}
-
 function setStyle(node, key, value) {
 	node.style.setProperty(key, value);
+}
+
+function blankObject() {
+	return Object.create(null);
 }
 
 function destroy(detach) {
 	this.destroy = noop;
 	this.fire('destroy');
-	this.set = this.get = noop;
+	this.set = noop;
 
-	if (detach !== false) this._fragment.unmount();
-	this._fragment.destroy();
-	this._fragment = this._state = null;
+	this._fragment.d(detach !== false);
+	this._fragment = null;
+	this._state = {};
 }
 
-function differs(a, b) {
-	return a !== b || ((a && typeof a === 'object') || typeof a === 'function');
-}
-
-function dispatchObservers(component, group, changed, newState, oldState) {
-	for (var key in group) {
-		if (!changed[key]) continue;
-
-		var newValue = newState[key];
-		var oldValue = oldState[key];
-
-		var callbacks = group[key];
-		if (!callbacks) continue;
-
-		for (var i = 0; i < callbacks.length; i += 1) {
-			var callback = callbacks[i];
-			if (callback.__calling) continue;
-
-			callback.__calling = true;
-			callback.call(component, newValue, oldValue);
-			callback.__calling = false;
-		}
-	}
-}
-
-function get(key) {
-	return key ? this._state[key] : this._state;
+function _differs(a, b) {
+	return a != a ? b == b : a !== b || ((a && typeof a === 'object') || typeof a === 'function');
 }
 
 function fire(eventName, data) {
@@ -84,34 +51,49 @@ function fire(eventName, data) {
 	if (!handlers) return;
 
 	for (var i = 0; i < handlers.length; i += 1) {
-		handlers[i].call(this, data);
+		var handler = handlers[i];
+
+		if (!handler.__calling) {
+			try {
+				handler.__calling = true;
+				handler.call(this, data);
+			} finally {
+				handler.__calling = false;
+			}
+		}
 	}
 }
 
-function observe(key, callback, options) {
-	var group = options && options.defer
-		? this._observers.post
-		: this._observers.pre;
+function flush(component) {
+	component._lock = true;
+	callAll(component._beforecreate);
+	callAll(component._oncreate);
+	callAll(component._aftercreate);
+	component._lock = false;
+}
 
-	(group[key] || (group[key] = [])).push(callback);
+function get() {
+	return this._state;
+}
 
-	if (!options || options.init !== false) {
-		callback.__calling = true;
-		callback.call(this, this._state[key]);
-		callback.__calling = false;
+function init(component, options) {
+	component._handlers = blankObject();
+	component._slots = blankObject();
+	component._bind = options._bind;
+	component._staged = {};
+
+	component.options = options;
+	component.root = options.root || component;
+	component.store = options.store || component.root.store;
+
+	if (!options.root) {
+		component._beforecreate = [];
+		component._oncreate = [];
+		component._aftercreate = [];
 	}
-
-	return {
-		cancel: function() {
-			var index = group[key].indexOf(callback);
-			if (~index) group[key].splice(index, 1);
-		}
-	};
 }
 
 function on(eventName, handler) {
-	if (eventName === 'teardown') return this.on('destroy', handler);
-
 	var handlers = this._handlers[eventName] || (this._handlers[eventName] = []);
 	handlers.push(handler);
 
@@ -125,12 +107,8 @@ function on(eventName, handler) {
 
 function set(newState) {
 	this._set(assign({}, newState));
-	if (this._root._lock) return;
-	this._root._lock = true;
-	callAll(this._root._beforecreate);
-	callAll(this._root._oncreate);
-	callAll(this._root._aftercreate);
-	this._root._lock = false;
+	if (this.root._lock) return;
+	flush(this.root);
 }
 
 function _set(newState) {
@@ -138,139 +116,122 @@ function _set(newState) {
 		changed = {},
 		dirty = false;
 
+	newState = assign(this._staged, newState);
+	this._staged = {};
+
 	for (var key in newState) {
-		if (differs(newState[key], oldState[key])) changed[key] = dirty = true;
+		if (this._differs(newState[key], oldState[key])) changed[key] = dirty = true;
 	}
 	if (!dirty) return;
 
-	this._state = assign({}, oldState, newState);
-	this._recompute(changed, this._state, oldState, false);
+	this._state = assign(assign({}, oldState), newState);
+	this._recompute(changed, this._state);
 	if (this._bind) this._bind(changed, this._state);
-	dispatchObservers(this, this._observers.pre, changed, this._state, oldState);
-	this._fragment.update(changed, this._state);
-	dispatchObservers(this, this._observers.post, changed, this._state, oldState);
+
+	if (this._fragment) {
+		this.fire("state", { changed: changed, current: this._state, previous: oldState });
+		this._fragment.p(changed, this._state);
+		this.fire("update", { changed: changed, current: this._state, previous: oldState });
+	}
+}
+
+function _stage(newState) {
+	assign(this._staged, newState);
 }
 
 function callAll(fns) {
-	while (fns && fns.length) fns.pop()();
+	while (fns && fns.length) fns.shift()();
 }
 
 function _mount(target, anchor) {
-	this._fragment.mount(target, anchor);
-}
-
-function _unmount() {
-	this._fragment.unmount();
+	this._fragment[this._fragment.i ? 'i' : 'm'](target, anchor || null);
 }
 
 var proto = {
-	destroy: destroy,
-	get: get,
-	fire: fire,
-	observe: observe,
-	on: on,
-	set: set,
-	teardown: destroy,
+	destroy,
+	get,
+	fire,
+	on,
+	set,
 	_recompute: noop,
-	_set: _set,
-	_mount: _mount,
-	_unmount: _unmount
+	_set,
+	_stage,
+	_mount,
+	_differs
 };
 
-var template = (function() {
+/* src/Scrim.html generated by Svelte v2.13.5 */
 const DEFAULTS = {
   opacity: 0.3,
   background: '#000000'
 };
 Object.freeze(DEFAULTS);
 
-return {
-  setup (Scrim) {
-    Scrim.DEFAULTS = DEFAULTS;
-  },
-
-  data () {
-    return Object.assign({}, DEFAULTS)
-  }
+function data() {
+  return Object.assign({}, DEFAULTS)
 }
-}());
 
-function encapsulateStyles(node) {
-	setAttribute(node, "svelte-1216306015", "");
+function setup(Scrim) {
+  Scrim.DEFAULTS = DEFAULTS;
 }
 
 function add_css() {
 	var style = createElement("style");
-	style.id = 'svelte-1216306015-style';
-	style.textContent = ".svelte-scrim[svelte-1216306015]{position:fixed;top:0;right:0;left:0;height:100vh;-webkit-tap-highlight-color:rgba(0, 0, 0, 0)}";
-	appendNode(style, document.head);
+	style.id = 'svelte-1k4c6ft-style';
+	style.textContent = ".svelte-scrim.svelte-1k4c6ft{position:fixed;top:0;right:0;left:0;height:100vh;-webkit-tap-highlight-color:rgba(0, 0, 0, 0)}";
+	append(document.head, style);
 }
 
-function create_main_fragment(state, component) {
+function create_main_fragment(component, ctx) {
 	var div;
 
 	return {
-		create: function() {
+		c() {
 			div = createElement("div");
-			this.hydrate();
+			div.className = "svelte-scrim svelte-1k4c6ft";
+			setStyle(div, "opacity", ctx.opacity);
+			setStyle(div, "background", ctx.background);
 		},
 
-		hydrate: function(nodes) {
-			encapsulateStyles(div);
-			div.className = "svelte-scrim";
-			setStyle(div, "opacity", state.opacity);
-			setStyle(div, "background", state.background);
+		m(target, anchor) {
+			insert(target, div, anchor);
 		},
 
-		mount: function(target, anchor) {
-			insertNode(div, target, anchor);
-		},
-
-		update: function(changed, state) {
-			if ( changed.opacity ) {
-				setStyle(div, "opacity", state.opacity);
+		p(changed, ctx) {
+			if (changed.opacity) {
+				setStyle(div, "opacity", ctx.opacity);
 			}
 
-			if ( changed.background ) {
-				setStyle(div, "background", state.background);
+			if (changed.background) {
+				setStyle(div, "background", ctx.background);
 			}
 		},
 
-		unmount: function() {
-			detachNode(div);
-		},
-
-		destroy: noop
+		d(detach) {
+			if (detach) {
+				detachNode(div);
+			}
+		}
 	};
 }
 
 function Scrim(options) {
-	this.options = options;
-	this._state = assign(template.data(), options.data);
+	init(this, options);
+	this._state = assign(data(), options.data);
+	this._intro = true;
 
-	this._observers = {
-		pre: Object.create(null),
-		post: Object.create(null)
-	};
+	if (!document.getElementById("svelte-1k4c6ft-style")) add_css();
 
-	this._handlers = Object.create(null);
-
-	this._root = options._root || this;
-	this._yield = options._yield;
-	this._bind = options._bind;
-
-	if (!document.getElementById("svelte-1216306015-style")) add_css();
-
-	this._fragment = create_main_fragment(this._state, this);
+	this._fragment = create_main_fragment(this, this._state);
 
 	if (options.target) {
-		this._fragment.create();
-		this._fragment.mount(options.target, options.anchor || null);
+		this._fragment.c();
+		this._mount(options.target, options.anchor);
 	}
 }
 
-assign(Scrim.prototype, proto );
+assign(Scrim.prototype, proto);
 
-template.setup(Scrim);
+setup(Scrim);
 
 module.exports = Scrim;

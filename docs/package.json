@@ -3,7 +3,5 @@
   "private": true,
   "scripts": {
     "build": "rollup -c"
-  },
-  "dependencies": {},
-  "devDependencies": {}
+  }
 }

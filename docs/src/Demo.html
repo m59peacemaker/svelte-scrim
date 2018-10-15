@@ -10,16 +10,18 @@
   <input type="color" bind:value="scrim.background" />
 </label>
 
-{{#if !scrimVisible}}
-<button on:click="set({ scrimVisible: true })">Preview Scrim</button>
-{{else}}
+{#if !scrimVisible}
+  <button on:click="set({ scrimVisible: true })">Preview Scrim</button>
+{:else}
   <p>Press the scrim to dismiss it.</p>
 
   <div on:click="set({ scrimVisible: false })">
-    <Scrim opacity="{{ scrim.opacity }}" background="{{ scrim.background }}" />
+    <Scrim opacity="{ scrim.opacity }" background="{ scrim.background }" />
   </div>
-{{/if}}
-<svelte-scrim data-opacity="{{ scrim.opacity }}" data-background="{{ scrim.background }}" />
+{/if}
+<!--
+<svelte-scrim data-opacity="{ scrim.opacity }" data-background="{ scrim.background }" />
+-->
 
 <script>
 import Scrim from '../../'
@@ -30,6 +32,7 @@ export default {
 
   data () {
     return {
+      scrimVisible: false,
       scrim: Object.assign({}, Scrim.DEFAULTS)
     }
   }
